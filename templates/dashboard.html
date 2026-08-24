@@ -1,0 +1,1458 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Gesture Data Dashboard</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <style>
+        .pagination-controls {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 18px;
+        }
+
+        .pagination-button {
+            min-width: 110px;
+            padding: 10px 16px;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            background: #1e293b;
+            color: #f8fafc;
+            cursor: pointer;
+        }
+
+        .pagination-button:hover:not(:disabled) {
+            border-color: #38bdf8;
+            color: #38bdf8;
+        }
+
+        .pagination-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.45;
+        }
+
+        .page-indicator {
+            min-width: 110px;
+            color: #94a3b8;
+            text-align: center;
+        }
+
+        .toast-container {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 9999;
+            display: flex;
+            width: min(360px, calc(100vw - 48px));
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .toast-message {
+            padding: 14px 18px;
+            border: 1px solid #334155;
+            border-left: 4px solid #38bdf8;
+            border-radius: 10px;
+            background: #172036;
+            color: #f8fafc;
+            box-shadow: 0 14px 35px rgba(0, 0, 0, 0.28);
+            animation: toast-in 0.25s ease-out;
+        }
+
+        .toast-message.success {
+            border-left-color: #22c55e;
+        }
+
+        .toast-message.error {
+            border-left-color: #ef4444;
+        }
+
+        .toast-message.warning {
+            border-left-color: #f59e0b;
+        }
+
+        .dashboard-message {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            margin: 22px 60px 0;
+            padding: 16px 20px;
+            border: 1px solid #334155;
+            border-left: 4px solid #38bdf8;
+            border-radius: 12px;
+            background: #172036;
+            color: #cbd5e1;
+        }
+
+        .dashboard-message strong {
+            display: block;
+            margin-bottom: 4px;
+            color: #f8fafc;
+        }
+
+        .dashboard-message.offline {
+            border-left-color: #ef4444;
+        }
+
+        .dashboard-message.empty {
+            border-left-color: #f59e0b;
+        }
+
+        .dashboard-message.hidden {
+            display: none;
+        }
+
+        .retry-button {
+            flex: 0 0 auto;
+            padding: 10px 16px;
+            border: 1px solid #38bdf8;
+            border-radius: 9px;
+            background: transparent;
+            color: #38bdf8;
+            cursor: pointer;
+        }
+
+        .retry-button:hover {
+            background: rgba(56, 189, 248, 0.12);
+        }
+
+        @keyframes toast-in {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 640px) {
+            .dashboard-message {
+                align-items: flex-start;
+                margin: 16px 20px 0;
+                flex-direction: column;
+            }
+
+            .pagination-controls {
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+
+    <script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+</head>
+
+<body>
+    <div
+        id="toast-container"
+        class="toast-container"
+        aria-live="polite"
+        aria-atomic="true"
+    ></div>
+
+    <header class="topbar">
+        <div>
+            <h1>Gesture Data Dashboard</h1>
+            <p>Camera-based gesture event monitoring</p>
+        </div>
+
+        <div class="system-status{% if not data.database_connected %} database-offline{% endif %}" id="system-status">
+            <span class="status-dot"></span>
+
+            <span id="status-text">
+                {% if data.database_connected %}
+                Database Connected
+                {% else %}
+                Database Disconnected
+                {% endif %}
+            </span>
+        </div>
+    </header>
+
+    <div
+        id="database-offline-message"
+        class="dashboard-message offline{% if data.database_connected %} hidden{% endif %}"
+        role="alert"
+    >
+        <div>
+            <strong>PostgreSQL connection unavailable</strong>
+            Dashboard data cannot be updated until the database connection is restored.
+        </div>
+
+        <button type="button" id="retry-connection" class="retry-button">
+            Retry Connection
+        </button>
+    </div>
+
+    <div
+        id="empty-data-message"
+        class="dashboard-message empty{% if data.total_events > 0 or not data.database_connected %} hidden{% endif %}"
+    >
+        <div>
+            <strong>No gesture events recorded yet</strong>
+            Start the camera application and perform a supported gesture to create the first event.
+        </div>
+    </div>
+
+    <main class="dashboard">
+        <section class="summary-cards">
+            <article class="card">
+                <p>Total Events</p>
+
+                <h2 id="total-events">
+                    {{ data.total_events }}
+                </h2>
+            </article>
+
+            <article class="card">
+                <p>Open Palm</p>
+
+                <h2 id="open-palm-count">
+                    {{ data.open_palm_count }}
+                </h2>
+            </article>
+
+            <article class="card">
+                <p>Fist</p>
+
+                <h2 id="fist-count">
+                    {{ data.fist_count }}
+                </h2>
+            </article>
+
+            <article class="card">
+                <p>Point</p>
+
+                <h2 id="point-count">
+                    {{ data.point_count }}
+                </h2>
+            </article>
+
+            <article class="card">
+                <p>Most Common</p>
+
+                <h2 class="text-value" id="most-common">
+                    {{ data.most_common_gesture }}
+                </h2>
+            </article>
+            <article class="card">
+                <p>Today's Events</p>
+
+                <h2 id="today-event-count">
+                    {{ data.today_event_count }}
+                </h2>
+            </article>
+
+            <article class="card">
+                <p>Busiest Hour Today</p>
+
+                <h2 class="text-value" id="busiest-hour">
+                    {{ data.busiest_hour }}
+                </h2>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel chart-panel" id="distribution-panel">
+                <div class="panel-heading">
+                    <div>
+                        <h3>Gesture Distribution</h3>
+                        <p>Recorded event counts by gesture</p>
+                    </div>
+                </div>
+
+                <div class="gesture-bars">
+                    <div class="gesture-row">
+                        <div class="gesture-label">
+                            <span>Open Palm</span>
+
+                            <strong id="open-palm-chart-count">
+                                {{ data.open_palm_count }}
+                                ({{ data.open_palm_percentage }}%)
+                            </strong>
+                        </div>
+
+                        <progress id="open-palm-progress" class="gesture-progress open-palm-progress"
+                            value="{{ data.open_palm_count }}"
+                            max="{{ data.total_events if data.total_events > 0 else 1 }}"></progress>
+                    </div>
+
+                    <div class="gesture-row">
+                        <div class="gesture-label">
+                            <span>Fist</span>
+
+                            <strong id="fist-chart-count">
+                                {{ data.fist_count }}
+                                ({{ data.fist_percentage }}%)
+                            </strong>
+                        </div>
+
+                        <progress id="fist-progress" class="gesture-progress fist-progress"
+                            value="{{ data.fist_count }}"
+                            max="{{ data.total_events if data.total_events > 0 else 1 }}"></progress>
+                    </div>
+
+                    <div class="gesture-row">
+                        <div class="gesture-label">
+                            <span>Point</span>
+
+                            <strong id="point-chart-count">
+                                {{ data.point_count }}
+                                ({{ data.point_percentage }}%)
+                            </strong>
+                        </div>
+
+                        <progress id="point-progress" class="gesture-progress point-progress"
+                            value="{{ data.point_count }}"
+                            max="{{ data.total_events if data.total_events > 0 else 1 }}"></progress>
+                    </div>
+                </div>
+            </article>
+
+            <article class="panel event-panel" id="latest-event-panel">
+                <h3>Latest Event</h3>
+
+                <p class="event-time" id="last-event-time">
+                    {{ data.last_event_time }}
+                </p>
+
+                <div class="event-description">
+                    Event data is read from the PostgreSQL database.
+                </div>
+
+                <a
+                    class="export-button"
+                    id="export-csv-button"
+                    href="/export/csv?gesture=ALL"
+                >
+                    Export PostgreSQL Data
+                </a>
+
+                <a class="refresh-button" href="/">
+                    Refresh Data
+                </a>
+            </article>
+        </section>
+
+        <section class="trend-panel">
+            <div class="panel-heading">
+                <div>
+                    <h3>Daily Event Trend</h3>
+                    <p>Gesture events recorded during the last 7 days</p>
+                </div>
+            </div>
+
+            <div class="trend-chart-container">
+                <canvas id="daily-trend-chart"></canvas>
+            </div>
+        </section>
+
+        <section class="hourly-panel">
+            <div class="panel-heading">
+                <div>
+                    <h3>Today's Hourly Activity</h3>
+                    <p>Gesture events recorded by hour today</p>
+                </div>
+            </div>
+
+            <div class="hourly-chart-container">
+                <canvas id="hourly-activity-chart"></canvas>
+            </div>
+        </section>
+
+        <section class="accuracy-panel">
+            <div class="panel-heading">
+                <div>
+                    <h3>Gesture Detection Accuracy</h3>
+
+                    <p>
+                        Accuracy results calculated from
+                        controlled camera tests
+                    </p>
+                </div>
+            </div>
+
+            <div class="accuracy-cards">
+                <article class="accuracy-card primary">
+                    <p>Overall Accuracy</p>
+
+                    <h2 id="overall-accuracy">
+                        {{ data.overall_accuracy }}%
+                    </h2>
+                </article>
+
+                <article class="accuracy-card">
+                    <p>Test Samples</p>
+
+                    <h2 id="total-accuracy-samples">
+                        {{ data.total_accuracy_samples }}
+                    </h2>
+                </article>
+
+                <article class="accuracy-card">
+                    <p>Open Palm Accuracy</p>
+
+                    <h2 id="open-palm-accuracy">
+                        {{ data.open_palm_accuracy }}%
+                    </h2>
+                </article>
+
+                <article class="accuracy-card">
+                    <p>Fist Accuracy</p>
+
+                    <h2 id="fist-accuracy">
+                        {{ data.fist_accuracy }}%
+                    </h2>
+                </article>
+
+                <article class="accuracy-card">
+                    <p>Point Accuracy</p>
+
+                    <h2 id="point-accuracy">
+                        {{ data.point_accuracy }}%
+                    </h2>
+                </article>
+            </div>
+        </section>
+
+        <section class="history-panel">
+            <div class="history-heading">
+                <div>
+                    <h3>Recent Gesture Events</h3>
+                    <p>PostgreSQL events matching the selected filters</p>
+                </div>
+
+                <div class="history-filters">
+                    <label class="date-filter-label">
+                        <span>Rows</span>
+
+                        <select
+                            id="page-size-filter"
+                            class="gesture-filter"
+                        >
+                            <option value="10" selected>10</option>
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                        </select>
+                    </label>
+
+                    <select id="gesture-filter" class="gesture-filter">
+                        <option value="ALL">
+                            All Gestures
+                        </option>
+
+                        <option value="OPEN PALM">
+                            Open Palm
+                        </option>
+
+                        <option value="FIST">
+                            Fist
+                        </option>
+
+                        <option value="POINT">
+                            Point
+                        </option>
+                    </select>
+
+                    <label class="date-filter-label">
+                        <span>Start Date</span>
+
+                        <input type="date" id="start-date-filter" class="date-filter">
+                    </label>
+
+                    <label class="date-filter-label">
+                        <span>End Date</span>
+
+                        <input type="date" id="end-date-filter" class="date-filter">
+                    </label>
+
+                    <button type="button" id="clear-filters" class="clear-filter-button">
+                        Clear
+                    </button>
+                </div>
+            </div>
+
+            <div class="filter-summary">
+                Showing
+                <strong id="filtered-event-count">0</strong>
+                event(s)
+            </div>
+
+            <div class="table-container">
+                <table class="event-table">
+                    <thead>
+                        <tr>
+                            <th>Event Time</th>
+                            <th>Gesture</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="event-table-body">
+                        {% for event in data.recent_events %}
+                        <tr>
+                            <td>
+                                {{ event.event_time }}
+                            </td>
+
+                            <td>
+                                <span class="gesture-badge
+                                        {% if event.gesture_name == 'OPEN PALM' %}
+                                            open-palm-badge
+                                        {% elif event.gesture_name == 'FIST' %}
+                                            fist-badge
+                                        {% elif event.gesture_name == 'POINT' %}
+                                            point-badge
+                                        {% endif %}
+                                        ">
+                                    {{ event.gesture_name }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="2">
+                                No gesture events found.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="pagination-controls">
+                <button
+                    type="button"
+                    id="previous-page"
+                    class="pagination-button"
+                >
+                    Previous
+                </button>
+
+                <span id="page-indicator" class="page-indicator">
+                    Page 1 / 1
+                </span>
+
+                <button
+                    type="button"
+                    id="next-page"
+                    class="pagination-button"
+                >
+                    Next
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        let lastStateKey = null;
+        let databaseConnected = true;
+        let dailyTrendChart = null;
+        let hourlyActivityChart = null;
+        let filteredEvents = [];
+        let currentEventPage = 1;
+        let totalEventPages = 1;
+        let totalFilteredEventCount = 0;
+        let lastDatabaseState = null;
+
+        let eventsPerPage = 10;
+
+
+        function showToast(message, type = "info") {
+            const toastContainer = document.getElementById(
+                "toast-container"
+            );
+
+            const toast = document.createElement("div");
+
+            toast.className = `toast-message ${type}`;
+            toast.textContent = message;
+
+            toastContainer.appendChild(toast);
+
+            setTimeout(() => {
+                toast.remove();
+            }, 3500);
+        }
+
+
+        function getGestureBadgeClass(gestureName) {
+            if (gestureName === "OPEN PALM") {
+                return "open-palm-badge";
+            }
+
+            if (gestureName === "FIST") {
+                return "fist-badge";
+            }
+
+            if (gestureName === "POINT") {
+                return "point-badge";
+            }
+
+            return "";
+        }
+
+
+        function updateDailyTrendChart(dailyTrend) {
+            if (!Array.isArray(dailyTrend)) {
+                return;
+            }
+
+            const labels = dailyTrend.map(
+                (item) => item.label
+            );
+
+            const counts = dailyTrend.map(
+                (item) => item.count
+            );
+
+            if (dailyTrendChart) {
+                dailyTrendChart.data.labels = labels;
+                dailyTrendChart.data.datasets[0].data =
+                    counts;
+
+                dailyTrendChart.update();
+                return;
+            }
+
+            const chartCanvas = document.getElementById(
+                "daily-trend-chart"
+            );
+
+            if (!chartCanvas) {
+                return;
+            }
+
+            dailyTrendChart = new Chart(
+                chartCanvas,
+                {
+                    type: "line",
+
+                    data: {
+                        labels: labels,
+
+                        datasets: [{
+                            label: "Gesture Events",
+                            data: counts,
+                            borderColor: "#38bdf8",
+                            backgroundColor:
+                                "rgba(56, 189, 248, 0.18)",
+                            pointBackgroundColor:
+                                "#7dd3fc",
+                            pointBorderColor: "#0f172a",
+                            pointRadius: 5,
+                            pointHoverRadius: 7,
+                            borderWidth: 3,
+                            fill: true,
+                            tension: 0.35
+                        }]
+                    },
+
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+
+                        plugins: {
+                            legend: {
+                                labels: {
+                                    color: "#cbd5e1"
+                                }
+                            }
+                        },
+
+                        scales: {
+                            x: {
+                                ticks: {
+                                    color: "#94a3b8"
+                                },
+
+                                grid: {
+                                    color:
+                                        "rgba(148, 163, 184, 0.10)"
+                                }
+                            },
+
+                            y: {
+                                beginAtZero: true,
+
+                                ticks: {
+                                    color: "#94a3b8",
+                                    precision: 0
+                                },
+
+                                grid: {
+                                    color:
+                                        "rgba(148, 163, 184, 0.10)"
+                                }
+                            }
+                        }
+                    }
+                }
+            );
+        }
+
+
+        function updateHourlyActivityChart(hourlyActivity) {
+            if (!Array.isArray(hourlyActivity)) {
+                return;
+            }
+
+            const labels = hourlyActivity.map(
+                (item) => item.label
+            );
+
+            const counts = hourlyActivity.map(
+                (item) => item.count
+            );
+
+            if (hourlyActivityChart) {
+                hourlyActivityChart.data.labels =
+                    labels;
+
+                hourlyActivityChart
+                    .data
+                    .datasets[0]
+                    .data = counts;
+
+                hourlyActivityChart.update();
+                return;
+            }
+
+            const chartCanvas = document.getElementById(
+                "hourly-activity-chart"
+            );
+
+            if (!chartCanvas) {
+                return;
+            }
+
+            hourlyActivityChart = new Chart(
+                chartCanvas,
+                {
+                    type: "bar",
+
+                    data: {
+                        labels: labels,
+
+                        datasets: [{
+                            label: "Events",
+                            data: counts,
+
+                            backgroundColor:
+                                "rgba(34, 197, 94, 0.65)",
+
+                            borderColor: "#22c55e",
+                            borderWidth: 1,
+                            borderRadius: 5
+                        }]
+                    },
+
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+
+                        plugins: {
+                            legend: {
+                                labels: {
+                                    color: "#cbd5e1"
+                                }
+                            }
+                        },
+
+                        scales: {
+                            x: {
+                                ticks: {
+                                    color: "#94a3b8",
+                                    maxRotation: 45,
+                                    minRotation: 45
+                                },
+
+                                grid: {
+                                    display: false
+                                }
+                            },
+
+                            y: {
+                                beginAtZero: true,
+
+                                ticks: {
+                                    color: "#94a3b8",
+                                    precision: 0
+                                },
+
+                                grid: {
+                                    color:
+                                        "rgba(148, 163, 184, 0.10)"
+                                }
+                            }
+                        }
+                    }
+                }
+            );
+        }
+        async function loadFilteredEvents(resetPage = false) {
+            if (resetPage) {
+                currentEventPage = 1;
+            }
+
+            const selectedGesture = document
+                .getElementById("gesture-filter")
+                .value;
+
+            const startDate = document
+                .getElementById("start-date-filter")
+                .value;
+
+            const endDate = document
+                .getElementById("end-date-filter")
+                .value;
+
+            const queryParameters =
+                new URLSearchParams();
+
+            queryParameters.set(
+                "gesture",
+                selectedGesture
+            );
+
+            queryParameters.set(
+                "page",
+                currentEventPage
+            );
+
+            queryParameters.set(
+                "per_page",
+                eventsPerPage
+            );
+
+            if (startDate) {
+                queryParameters.set(
+                    "start_date",
+                    startDate
+                );
+            }
+
+            if (endDate) {
+                queryParameters.set(
+                    "end_date",
+                    endDate
+                );
+            }
+
+            document.getElementById(
+                "export-csv-button"
+            ).href =
+                `/export/csv?${queryParameters.toString()}`;
+
+            try {
+                const response = await fetch(
+                    `/api/events?${queryParameters.toString()}`
+                );
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        data.error
+                        || "Filtered events could not be loaded."
+                    );
+                }
+
+                filteredEvents = Array.isArray(data.events)
+                    ? data.events
+                    : [];
+
+                currentEventPage = data.page || 1;
+                totalEventPages = data.total_pages || 1;
+                totalFilteredEventCount = data.count || 0;
+
+                renderRecentEvents();
+
+                document.getElementById(
+                    "filtered-event-count"
+                ).textContent = data.count;
+
+            } catch (error) {
+                console.log(
+                    "Filtered events could not be loaded.",
+                    error
+                );
+
+                filteredEvents = [];
+                currentEventPage = 1;
+                totalEventPages = 1;
+                totalFilteredEventCount = 0;
+                renderRecentEvents();
+
+                showToast(
+                    "Events could not be loaded.",
+                    "error"
+                );
+            }
+        }
+
+        function renderRecentEvents() {
+            const tableBody = document.getElementById(
+                "event-table-body"
+            );
+
+            currentEventPage = Math.min(
+                Math.max(currentEventPage, 1),
+                totalEventPages
+            );
+
+            const pageEvents = filteredEvents;
+
+            tableBody.innerHTML = "";
+
+            if (pageEvents.length === 0) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="2">
+                            No gesture events found.
+                        </td>
+                    </tr>
+                `;
+
+                document.getElementById(
+                    "filtered-event-count"
+                ).textContent = 0;
+
+            } else {
+                pageEvents.forEach((event) => {
+                const row = document.createElement("tr");
+
+                const badgeClass = getGestureBadgeClass(
+                    event.gesture_name
+                );
+
+                const eventTimeCell =
+                    document.createElement("td");
+
+                eventTimeCell.textContent =
+                    event.event_time;
+
+                const gestureCell =
+                    document.createElement("td");
+
+                const badge =
+                    document.createElement("span");
+
+                badge.className =
+                    `gesture-badge ${badgeClass}`;
+
+                badge.textContent =
+                    event.gesture_name;
+
+                gestureCell.appendChild(badge);
+                row.appendChild(eventTimeCell);
+                row.appendChild(gestureCell);
+                tableBody.appendChild(row);
+                });
+            }
+
+            document.getElementById(
+                "filtered-event-count"
+            ).textContent = totalFilteredEventCount;
+
+            document.getElementById(
+                "page-indicator"
+            ).textContent =
+                `Page ${currentEventPage} / ${totalEventPages}`;
+
+            document.getElementById(
+                "previous-page"
+            ).disabled = currentEventPage === 1;
+
+            document.getElementById(
+                "next-page"
+            ).disabled =
+                currentEventPage === totalEventPages;
+        }
+
+
+        function updateDatabaseStatus(isConnected) {
+            databaseConnected = isConnected;
+
+            if (
+                lastDatabaseState !== null
+                && lastDatabaseState !== isConnected
+            ) {
+                showToast(
+                    isConnected
+                        ? "Database connection restored."
+                        : "Database connection lost.",
+                    isConnected ? "success" : "warning"
+                );
+            }
+
+            lastDatabaseState = isConnected;
+
+            const statusText = document.getElementById(
+                "status-text"
+            );
+
+            const systemStatus = document.getElementById(
+                "system-status"
+            );
+
+            const offlineMessage = document.getElementById(
+                "database-offline-message"
+            );
+
+            systemStatus.classList.remove(
+                "database-offline"
+            );
+
+            if (isConnected) {
+                statusText.textContent =
+                    "Database Connected";
+
+                offlineMessage.classList.add("hidden");
+            } else {
+                statusText.textContent =
+                    "Database Disconnected";
+
+                systemStatus.classList.add(
+                    "database-offline"
+                );
+
+                offlineMessage.classList.remove("hidden");
+            }
+        }
+
+
+        function updateEmptyDataState(totalEvents) {
+            const emptyDataMessage = document.getElementById(
+                "empty-data-message"
+            );
+
+            const shouldShow =
+                databaseConnected
+                && Number(totalEvents) === 0;
+
+            emptyDataMessage.classList.toggle(
+                "hidden",
+                !shouldShow
+            );
+        }
+
+
+        async function refreshDashboardData() {
+            try {
+                const response = await fetch(
+                    "/api/dashboard-data"
+                );
+
+                if (!response.ok) {
+                    throw new Error(
+                        "Dashboard API request failed."
+                    );
+                }
+
+                const data = await response.json();
+
+                updateDatabaseStatus(
+                    data.database_connected
+                );
+
+                document.getElementById(
+                    "total-events"
+                ).textContent = data.total_events;
+
+                updateEmptyDataState(
+                    data.total_events
+                );
+
+                document.getElementById(
+                    "open-palm-count"
+                ).textContent =
+                    data.open_palm_count;
+
+                document.getElementById(
+                    "fist-count"
+                ).textContent = data.fist_count;
+
+                document.getElementById(
+                    "point-count"
+                ).textContent =
+                    data.point_count;
+
+                document.getElementById(
+                    "most-common"
+                ).textContent =
+                    data.most_common_gesture;
+
+                document.getElementById(
+                    "last-event-time"
+                ).textContent =
+                    data.last_event_time;
+
+                document.getElementById(
+                    "today-event-count"
+                ).textContent = data.today_event_count;
+
+                document.getElementById(
+                    "busiest-hour"
+                ).textContent = data.busiest_hour;
+
+                document.getElementById(
+                    "overall-accuracy"
+                ).textContent =
+                    `${data.overall_accuracy}%`;
+
+                document.getElementById(
+                    "total-accuracy-samples"
+                ).textContent =
+                    data.total_accuracy_samples;
+
+                document.getElementById(
+                    "open-palm-accuracy"
+                ).textContent =
+                    `${data.open_palm_accuracy}%`;
+
+                document.getElementById(
+                    "fist-accuracy"
+                ).textContent =
+                    `${data.fist_accuracy}%`;
+
+                document.getElementById(
+                    "point-accuracy"
+                ).textContent =
+                    `${data.point_accuracy}%`;
+
+                document.getElementById(
+                    "open-palm-chart-count"
+                ).textContent =
+                    `${data.open_palm_count} `
+                    + `(${data.open_palm_percentage}%)`;
+
+                document.getElementById(
+                    "fist-chart-count"
+                ).textContent =
+                    `${data.fist_count} `
+                    + `(${data.fist_percentage}%)`;
+
+                document.getElementById(
+                    "point-chart-count"
+                ).textContent =
+                    `${data.point_count} `
+                    + `(${data.point_percentage}%)`;
+
+                const progressMax = Math.max(
+                    data.total_events,
+                    1
+                );
+
+                const openPalmProgress =
+                    document.getElementById(
+                        "open-palm-progress"
+                    );
+
+                const fistProgress =
+                    document.getElementById(
+                        "fist-progress"
+                    );
+
+                const pointProgress =
+                    document.getElementById(
+                        "point-progress"
+                    );
+
+                openPalmProgress.max = progressMax;
+                openPalmProgress.value =
+                    data.open_palm_count;
+
+                fistProgress.max = progressMax;
+                fistProgress.value =
+                    data.fist_count;
+
+                pointProgress.max = progressMax;
+                pointProgress.value =
+                    data.point_count;
+
+                updateDailyTrendChart(
+                    data.daily_trend
+                );
+
+                updateHourlyActivityChart(
+                    data.hourly_activity
+                );
+
+                await loadFilteredEvents();
+            } catch (error) {
+                console.log(
+                    "Dashboard data could not be refreshed.",
+                    error
+                );
+
+                updateDatabaseStatus(false);
+            }
+        }
+
+
+        function showRefreshMessage() {
+            const statusText = document.getElementById(
+                "status-text"
+            );
+
+            const systemStatus = document.getElementById(
+                "system-status"
+            );
+
+            statusText.textContent = "Data Refreshed";
+
+            systemStatus.classList.add(
+                "command-active"
+            );
+
+            showToast(
+                "Dashboard data refreshed.",
+                "success"
+            );
+
+            setTimeout(() => {
+                updateDatabaseStatus(
+                    databaseConnected
+                );
+
+                systemStatus.classList.remove(
+                    "command-active"
+                );
+            }, 1500);
+        }
+
+
+        async function checkGesture() {
+            try {
+                const response = await fetch(
+                    "/api/dashboard-state"
+                );
+
+                if (!response.ok) {
+                    throw new Error(
+                        "Gesture state request failed."
+                    );
+                }
+
+                const state = await response.json();
+
+                const stateKey =
+                    state.gesture + "-" + state.updated_at;
+
+                if (stateKey === lastStateKey) {
+                    return;
+                }
+
+                lastStateKey = stateKey;
+
+                const distributionPanel =
+                    document.getElementById(
+                        "distribution-panel"
+                    );
+
+                const latestEventPanel =
+                    document.getElementById(
+                        "latest-event-panel"
+                    );
+
+                distributionPanel.classList.remove(
+                    "gesture-selected"
+                );
+
+                latestEventPanel.classList.remove(
+                    "gesture-selected"
+                );
+
+                if (state.gesture === "OPEN PALM") {
+                    distributionPanel.classList.add(
+                        "gesture-selected"
+                    );
+
+                    distributionPanel.scrollIntoView({
+                        behavior: "smooth",
+                        block: "center"
+                    });
+                }
+
+                if (state.gesture === "FIST") {
+                    latestEventPanel.classList.add(
+                        "gesture-selected"
+                    );
+
+                    latestEventPanel.scrollIntoView({
+                        behavior: "smooth",
+                        block: "center"
+                    });
+                }
+
+                if (state.gesture === "POINT") {
+                    await refreshDashboardData();
+                    showRefreshMessage();
+                }
+            } catch (error) {
+                console.log(
+                    "Gesture state could not be read.",
+                    error
+                );
+            }
+        }
+
+        document.getElementById(
+            "gesture-filter"
+        ).addEventListener(
+            "change",
+            () => loadFilteredEvents(true)
+        );
+
+        document.getElementById(
+            "retry-connection"
+        ).addEventListener(
+            "click",
+            async () => {
+                showToast(
+                    "Checking database connection..."
+                );
+
+                await refreshDashboardData();
+            }
+        );
+
+        document.getElementById(
+            "page-size-filter"
+        ).addEventListener(
+            "change",
+            (event) => {
+                eventsPerPage = Number(
+                    event.target.value
+                );
+
+                loadFilteredEvents(true);
+            }
+        );
+
+        document.getElementById(
+            "start-date-filter"
+        ).addEventListener(
+            "change",
+            () => loadFilteredEvents(true)
+        );
+
+        document.getElementById(
+            "end-date-filter"
+        ).addEventListener(
+            "change",
+            () => loadFilteredEvents(true)
+        );
+
+        document.getElementById(
+            "previous-page"
+        ).addEventListener(
+            "click",
+            () => {
+                if (currentEventPage > 1) {
+                    currentEventPage -= 1;
+                    loadFilteredEvents();
+                }
+            }
+        );
+
+        document.getElementById(
+            "next-page"
+        ).addEventListener(
+            "click",
+            () => {
+                if (currentEventPage < totalEventPages) {
+                    currentEventPage += 1;
+                    loadFilteredEvents();
+                }
+            }
+        );
+
+        document.getElementById(
+            "export-csv-button"
+        ).addEventListener(
+            "click",
+            (event) => {
+                event.preventDefault();
+
+                const exportParameters =
+                    new URLSearchParams();
+
+                const selectedGesture = document
+                    .getElementById("gesture-filter")
+                    .value;
+
+                const startDate = document
+                    .getElementById("start-date-filter")
+                    .value;
+
+                const endDate = document
+                    .getElementById("end-date-filter")
+                    .value;
+
+                exportParameters.set(
+                    "gesture",
+                    selectedGesture
+                );
+
+                if (startDate) {
+                    exportParameters.set(
+                        "start_date",
+                        startDate
+                    );
+                }
+
+                if (endDate) {
+                    exportParameters.set(
+                        "end_date",
+                        endDate
+                    );
+                }
+
+                window.location.href =
+                    `/export/csv?${exportParameters.toString()}`;
+            }
+        );
+
+        document.getElementById(
+            "clear-filters"
+        ).addEventListener(
+            "click",
+            () => {
+                document.getElementById(
+                    "gesture-filter"
+                ).value = "ALL";
+
+                document.getElementById(
+                    "start-date-filter"
+                ).value = "";
+
+                document.getElementById(
+                    "end-date-filter"
+                ).value = "";
+
+                loadFilteredEvents(true);
+            }
+        );
+
+        setInterval(checkGesture, 1000);
+        setInterval(refreshDashboardData, 2000);
+
+        checkGesture();
+        refreshDashboardData();
+    </script>
+</body>
+
+</html>

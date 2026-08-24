@@ -1,0 +1,15 @@
+.venv
+__pycache__
+*.pyc
+.git
+.gitignore
+.env
+gesture_events.csv
+gesture_events_export.csv
+hand_landmarker.task
+migrate_csv_to_postgres.py
+camera_test.py
+hand_tracking.py
+event_logger.py
+analyze_events.py
+visualize_events.py

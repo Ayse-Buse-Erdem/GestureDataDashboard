@@ -1,0 +1,6 @@
+Flask
+psycopg[binary]
+python-dotenv
+opencv-python
+mediapipe
+matplotlib

@@ -1,0 +1,22 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+
+# Local environment settings
+.env
+
+# Generated exports and temporary data
+gesture_events.csv
+gesture_events_export*.csv
+gesture_events_filtered*.csv
+
+# Editor files
+.vscode/
+.idea/
+
+# Operating system files
+Thumbs.db
+.DS_Store

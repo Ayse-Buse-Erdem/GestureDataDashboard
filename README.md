@@ -62,7 +62,3 @@ python -m unittest test_dashboard.py -v
 ## Project Purpose
 
 The purpose of this project is to combine hand gesture recognition, database usage, data analysis, and web development in one application.
-
-## Project Status
-
-The project has been finalized after completing functional tests, documentation updates, and general repository checks.
